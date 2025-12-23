@@ -208,16 +208,63 @@ const CountryList = memo(({ countries, selectedCode, onSelect }: {
 ));
 CountryList.displayName = 'CountryList';
 
-const DomainList = memo(({ allDomains, selectedDomain, onSelect }: { 
-  allDomains: string[]; 
-  selectedDomain: string; 
+const DomainList = memo(({ allDomains, selectedDomain, onSelect }: {
+  allDomains: string[];
+  selectedDomain: string;
   onSelect: (d: string) => void;
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedQuery, setDebouncedQuery] = useState('');
+  const [visibleCount, setVisibleCount] = useState(50); // 初始只显示 50 个
+  const observerRef = useRef<IntersectionObserver | null>(null);
+  const sentinelRef = useRef<HTMLDivElement>(null);
+  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // 搜索防抖
+  useEffect(() => {
+    if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    timeoutRef.current = setTimeout(() => {
+      setDebouncedQuery(searchQuery);
+      setVisibleCount(50); // 重置显示数量
+    }, 300);
+    return () => {
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    };
+  }, [searchQuery]);
+
+  // 过滤域名（使用防抖后的查询）
   const filteredDomains = useMemo(() => {
-    if (!searchQuery) return allDomains;
-    return allDomains.filter(d => d.toLowerCase().includes(searchQuery.toLowerCase()));
-  }, [allDomains, searchQuery]);
+    if (!debouncedQuery) return allDomains;
+    const query = debouncedQuery.toLowerCase();
+    return allDomains.filter(d => d.toLowerCase().includes(query));
+  }, [allDomains, debouncedQuery]);
+
+  // 可见域名（分页加载）
+  const visibleDomains = useMemo(() => {
+    return filteredDomains.slice(0, visibleCount);
+  }, [filteredDomains, visibleCount]);
+
+  // IntersectionObserver 懒加载下一批
+  useEffect(() => {
+    if (observerRef.current) observerRef.current.disconnect();
+
+    observerRef.current = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && visibleCount < filteredDomains.length) {
+          setVisibleCount(prev => Math.min(prev + 50, filteredDomains.length));
+        }
+      },
+      { threshold: 0.1, rootMargin: '200px' }
+    );
+
+    if (sentinelRef.current) {
+      observerRef.current.observe(sentinelRef.current);
+    }
+
+    return () => {
+      if (observerRef.current) observerRef.current.disconnect();
+    };
+  }, [visibleCount, filteredDomains.length]);
 
   return (
     <div className="flex flex-col h-full">
@@ -226,16 +273,16 @@ const DomainList = memo(({ allDomains, selectedDomain, onSelect }: {
           <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
             <Icon name="search" className="w-4 h-4 text-white/40" />
           </div>
-          <input 
-            type="text" 
-            value={searchQuery} 
-            onChange={(e) => setSearchQuery(e.target.value)} 
-            placeholder="搜索域名" 
-            className="w-full pl-9 pr-8 py-2 bg-black/30 border border-white/10 rounded-[10px] text-[16px] text-white placeholder-white/30 focus:ring-2 focus:ring-white/20 focus:bg-black/40 transition-colors caret-[#007AFF] outline-none" 
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="搜索域名"
+            className="w-full pl-9 pr-8 py-2 bg-black/30 border border-white/10 rounded-[10px] text-[16px] text-white placeholder-white/30 focus:ring-2 focus:ring-white/20 focus:bg-black/40 transition-colors caret-[#007AFF] outline-none"
           />
           {searchQuery && (
-            <button 
-              onClick={() => setSearchQuery('')} 
+            <button
+              onClick={() => setSearchQuery('')}
               className="absolute inset-y-0 right-0 pr-3 flex items-center touch-manipulation active:scale-90 transition-transform"
             >
               <div className="bg-white/20 rounded-full p-0.5">
@@ -245,24 +292,29 @@ const DomainList = memo(({ allDomains, selectedDomain, onSelect }: {
           )}
         </div>
       </div>
-      <div className="p-4 pt-2 space-y-2">
-        {!searchQuery && (
-          <ListItem 
-            label="随机域名" 
-            isSelected={selectedDomain === 'random'} 
-            onClick={() => onSelect('random')} 
-            icon="sparkles" 
+      <div className="p-4 pt-2 space-y-2" style={{ contain: 'layout style paint' }}>
+        {!debouncedQuery && (
+          <ListItem
+            label="随机域名"
+            isSelected={selectedDomain === 'random'}
+            onClick={() => onSelect('random')}
+            icon="sparkles"
           />
         )}
-        {filteredDomains.map((domain) => (
-          <ListItem 
-            key={domain} 
-            label={domain} 
-            isSelected={selectedDomain === domain} 
-            onClick={() => onSelect(domain)} 
+        {visibleDomains.map((domain) => (
+          <ListItem
+            key={domain}
+            label={domain}
+            isSelected={selectedDomain === domain}
+            onClick={() => onSelect(domain)}
           />
         ))}
-        {filteredDomains.length === 0 && (
+        {visibleCount < filteredDomains.length && (
+          <div ref={sentinelRef} className="py-4 text-center">
+            <div className="inline-block w-5 h-5 border-2 border-white/20 border-t-white/80 rounded-full animate-spin" />
+          </div>
+        )}
+        {filteredDomains.length === 0 && debouncedQuery && (
           <div className="text-center py-8 text-white/30 text-sm">无匹配结果</div>
         )}
       </div>

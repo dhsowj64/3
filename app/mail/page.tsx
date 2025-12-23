@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo, memo } from 'react';
+import { useState, useEffect, useCallback, useMemo, memo, useRef } from 'react';
 import { tempMailList, isFavorite, toggleFavorite, type TempMail } from '@/lib/mailData';
 import { NavigationMenu, MenuButton } from '@/components/NavigationMenu';
 
@@ -88,10 +88,12 @@ MailCard.displayName = 'MailCard';
 
 export default function MailPage() {
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedQuery, setDebouncedQuery] = useState('');
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [showMenu, setShowMenu] = useState(false);
   const [bgLoaded, setBgLoaded] = useState(false);
+  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     const favs = new Set(
@@ -100,15 +102,26 @@ export default function MailPage() {
     setFavorites(favs);
   }, []);
 
+  // 搜索防抖
+  useEffect(() => {
+    if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    timeoutRef.current = setTimeout(() => {
+      setDebouncedQuery(searchQuery);
+    }, 200);
+    return () => {
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    };
+  }, [searchQuery]);
+
   const filteredMails = useMemo(() => {
-    if (!searchQuery) return tempMailList;
-    const query = searchQuery.toLowerCase();
+    if (!debouncedQuery) return tempMailList;
+    const query = debouncedQuery.toLowerCase();
     return tempMailList.filter(mail =>
       mail.name.toLowerCase().includes(query) ||
       mail.description?.toLowerCase().includes(query) ||
       mail.url.toLowerCase().includes(query)
     );
-  }, [searchQuery]);
+  }, [debouncedQuery]);
 
   const handleToggleFavorite = useCallback((mail: TempMail) => {
     const newIsFav = toggleFavorite(mail);
